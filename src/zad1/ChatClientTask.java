@@ -10,8 +10,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+
 
 public class ChatClientTask implements Runnable {
     private final ChatClient client;
@@ -37,7 +36,7 @@ public class ChatClientTask implements Runnable {
             client.login();
             client.handleReadChat(wait);
             for (String request : requests) {
-                client.send(request);
+                client.sendMessage(request);
                 client.handleReadChat(wait);
             }
             client.logout();
@@ -50,13 +49,7 @@ public class ChatClientTask implements Runnable {
     }
 
     public String get() throws InterruptedException, ExecutionException {
-        try {
-            return futureTask.get(3000, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            e.printStackTrace();
-            System.out.println("THIS IS THE ISSUE");
-        }
-        return "THIS IS THE ISSUE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n" + client.getChatView();
+        return futureTask.get();
     }
 
     public ChatClient getClient() {

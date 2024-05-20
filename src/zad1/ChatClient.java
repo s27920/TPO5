@@ -19,7 +19,7 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 
 public class ChatClient {
-    static public final int MAX_ATTEMPTS = 5;
+    static public final int MAX_ATTEMPTS = 20;
 
     private final String host;
     private final int port;
@@ -44,11 +44,9 @@ public class ChatClient {
                 socketChannel.bind(null);
                 socketChannel.connect(new InetSocketAddress(host, port));
                 socketChannel.configureBlocking(false);
-                for (String response : send("SYN " + id)) {
-                    if (response.equals("SYN " + id + " ACK")) {
-                        send("ACK " + id);
-                        return;
-                    }
+                if (sendCommand("SYN " + id) == 2){
+                    send("ACK " + id);
+                    return;
                 }
                 attempts++;
             } catch (ConnectException e) {
@@ -64,28 +62,32 @@ public class ChatClient {
     public void logout() {
         int attempts = 0;
         while(attempts < MAX_ATTEMPTS){
-            for (String response : send("SYN RST " + id)) {
-                String[] parts = response.split(" ");
-                if (parts[0].equals("SYN") && parts[1].equals("RST") && parts[parts.length - 1].equals("ACK") && response.contains(id)) {
-                    close();
-                    return;
-                }
+            if (sendCommand("SYN RST " + id) == 1){
+                sendMessage("ACK RST " + id);
+                close();
+                return;
             }
             attempts++;
         }
         System.out.println("Server unresponsive, failed logout.");
     }
 
-    public String[] send(String req) {
+    public int sendCommand(String req) {
+        send(req);
+        return processResponse(handleAwaitResponse());
+    }
+    public void sendMessage(String message){
+        send(message);
+    }
+    private void send(String text){
         try {
             communicationBuffer.clear();
-            communicationBuffer.put(req.getBytes(StandardCharsets.UTF_8));
+            communicationBuffer.put((text + ChatServer.delimiter).getBytes(StandardCharsets.UTF_8));
             communicationBuffer.flip();
             while (communicationBuffer.hasRemaining()) {
                 socketChannel.write(communicationBuffer);
             }
             communicationBuffer.clear();
-            return handleReadResponse();
         }catch (SocketException e){
             System.out.println("ERROR: " + e.getMessage());
             close();
@@ -95,14 +97,16 @@ public class ChatClient {
         }catch (IOException e) {
             throw new RuntimeException(e);
         }
-        return new String[]{};
     }
 
-    private String[] handleReadResponse() throws IOException{
+
+    private String handleAwaitResponse(){
         try(Selector selector = Selector.open()){
             socketChannel.register(selector, SelectionKey.OP_READ);
             while (selector.select() == 0);
             return middleman(selector);
+        } catch (IOException e) {
+            return "internal server issue idk";
         }
     }
 
@@ -121,18 +125,18 @@ public class ChatClient {
             if (passed < wait){
                 Thread.sleep(wait - passed);
             }
-            middleman(selector);
+            processResponse(middleman(selector));
         }
     }
 
-    private String[] middleman(Selector selector) throws IOException {
+    private String middleman(Selector selector) throws IOException {
         if (selector.selectedKeys().iterator().next().isReadable()) {
             return read();
         }
-        return new String[]{};
+        return "";
     }
 
-    public String[] read() throws IOException {
+    public String read() throws IOException {
         StringBuilder response = new StringBuilder();
         communicationBuffer.clear();
         while (socketChannel.read(communicationBuffer) > 0) {
@@ -140,20 +144,25 @@ public class ChatClient {
             response.append(StandardCharsets.UTF_8.decode(communicationBuffer));
             communicationBuffer.clear();
         }
-        return processResponse(response.toString());
+        return response.toString();
     }
 
-    private String[] processResponse(String wholeResponse){
+    private int processResponse(String wholeResponse){
         String[] responses = wholeResponse.split("\uD83D\uDE31");
+        int controlAction = -1;
         for (String response : responses) {
-            String[] split = response.split(" ");
-            if (!(split[0].equals("SYN") && split[split.length-1].equals("ACK"))) {
+            String[] parts = response.split(" ");
+            if (parts[0].equals("SYN") && parts[1].equals("RST") && parts[parts.length - 1].equals("ACK") && response.contains(id)) {
+                controlAction = 1;
+            } else if (parts[0].equals("SYN") && parts[parts.length-1].equals("ACK")) {
+                controlAction = 2;
+            } else {
                 if (!response.isEmpty()){
                     chatView.append(response).append("\n");
                 }
             }
         }
-        return responses;
+        return controlAction;
     }
 
     public void close() {

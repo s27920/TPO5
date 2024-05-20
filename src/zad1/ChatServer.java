@@ -29,6 +29,7 @@ public class ChatServer {
     private final ByteBuffer communicationBuffer;
     private final StringBuilder serverLog;
     private final Map<SocketChannel, String> idClientBySocket;
+    private final Map<SocketChannel, String> queuedClientAnswer;
     private final List<SocketChannel> activeClients;
 
     public ChatServer(String host, int port) {
@@ -39,6 +40,7 @@ public class ChatServer {
         this.serverLog = new StringBuilder();
         this.idClientBySocket = new ConcurrentHashMap<>();
         this.activeClients = new CopyOnWriteArrayList<>();
+        this.queuedClientAnswer = new ConcurrentHashMap<>();
     }
 
     public void startServer(){
@@ -58,8 +60,9 @@ public class ChatServer {
 
     public void stopServer(){
         if (!activeClients.isEmpty()) {
-            for (SocketChannel client : activeClients) {
-                respond("server shutting down. Disconnecting user " + getName(client), client);
+            for (int i = activeClients.size()-1; i >= 0; i--){
+                SocketChannel client = activeClients.get(i);
+                activeClients.remove(client);
                 logoutHandler(client);
             }
         }
@@ -120,23 +123,41 @@ public class ChatServer {
             communicationBuffer.flip();
             byte[] bytes = new byte[communicationBuffer.limit()];
             communicationBuffer.get(bytes);
-            String request = new String(bytes);
-            if (!request.isEmpty()) {
-                processRequest(request, client);
+            String requests = new String(bytes);
+            if (!requests.isEmpty()) {
+                for (String request : requests.split(delimiter)) {
+                    if (  !queuedClientAnswer.containsKey(client) || queuedClientAnswer.get(client).equals("null")){
+                        processRequest(request, client);
+                    }else {
+                        finishHandshake(request, client);
+                    }
+                }
             }
             communicationBuffer.clear();
         }
     }
 
+    private void finishHandshake(String request, SocketChannel client){
+        System.out.println(request + " Handshake");
+        if (request.equals(queuedClientAnswer.get(client))){
+            String[] reqParts = request.split(" ");
+            if (reqParts[0].equals("ACK") && reqParts[1].equals("RST") && reqParts.length == 3) {
+                queuedClientAnswer.put(client, "null");
+                activeClients.remove(client);
+            } else if (reqParts[0].equals("ACK") && reqParts.length == 2) {
+                globalLogInOutNotify("in", getName(client));
+                activeClients.add(client);
+                queuedClientAnswer.put(client, "null");
+            }
+        }
+    }
     private void processRequest(String request, SocketChannel client){
+        System.out.println(request);
         String[] reqParts = request.split(" ");
         if (reqParts.length > 0){
-            if (reqParts.length == 2 && reqParts[0].equals("SYN")) {
+            if (reqParts[0].equals("SYN")&& reqParts.length == 2) {
                 loginHandler(request, client);
-            } else if(reqParts.length == 2 && reqParts[0].equals("ACK")){
-                globalLoginOutNotify("in", getName(client));
-                activeClients.add(client);
-            } else if (reqParts[0].equals("SYN") && reqParts[1].equals("RST")) {
+            } else if (reqParts[0].equals("SYN") && reqParts[1].equals("RST") && reqParts.length == 3) {
                 logoutHandler(client);
             } else {
                 messageHandler(request, client);
@@ -151,14 +172,15 @@ public class ChatServer {
     }
 
     private void loginHandler(String request, SocketChannel client){
-        String login_;
         try {
-            login_ = request.replace("SYN ", "")+"\t"+client.getLocalAddress().toString();
-            String name = login_.split("\t")[0];
+            activeClients.add(client);
+            String name = request.replace("SYN ", "");
+            String login_ = name + "\t" + client.getLocalAddress().toString();
             if (!idClientBySocket.containsKey(client)){
                 idClientBySocket.put(client, login_);
             }
             respond("SYN " + name + " ACK", client);
+            queuedClientAnswer.put(client, "ACK " + getName(client));
         } catch (IOException e) {
             exceptionHandler(client, "Could not retrieve client address. Exiting");
         }
@@ -166,21 +188,23 @@ public class ChatServer {
 
     private void logoutHandler(SocketChannel client){
         String name = getName(client);
-        globalLoginOutNotify("out", name);
         respond("SYN RST " + name + " ACK", client);
-        activeClients.remove(client);
+        globalLogInOutNotify("out", name);
+        queuedClientAnswer.put(client, "ACK RST " + name);
+        System.out.println(queuedClientAnswer.get(client) + "<<<<<");
+
     }
 
     private void globalRespond(String message, String name){
         for (SocketChannel clientToContact : activeClients) {
-            respond(name + ": " + message + delimiter, clientToContact);
+            respond(name + ": " + message, clientToContact);
         }
     }
 
-    private void globalLoginOutNotify(String inOut, String name){
+    private void globalLogInOutNotify(String inOut, String name){
         serverLog.append(LocalTime.now().toString().substring(0,12)).append(" ").append(name).append(" logged ").append(inOut).append("\n");
         for (SocketChannel clientToContact : activeClients) {
-            respond(name + " logged " + inOut + delimiter, clientToContact);
+            respond(name + " logged " + inOut, clientToContact);
         }
     }
 
@@ -197,7 +221,7 @@ public class ChatServer {
     }
 
     private void respond(String response, SocketChannel client){
-        ByteBuffer resp = StandardCharsets.UTF_8.encode(CharBuffer.wrap(response));
+        ByteBuffer resp = StandardCharsets.UTF_8.encode(CharBuffer.wrap(response + delimiter));
         while (resp.hasRemaining()){
             try {
                 client.write(resp);
