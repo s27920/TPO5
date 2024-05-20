@@ -28,9 +28,10 @@ public class ChatServer {
     private final ExecutorService executorService;
     private final ByteBuffer communicationBuffer;
     private final StringBuilder serverLog;
+    private final List<SocketChannel> activeClients;
     private final Map<SocketChannel, String> idClientBySocket;
     private final Map<SocketChannel, String> queuedClientAnswer;
-    private final List<SocketChannel> activeClients;
+    private final Map<SocketChannel, String> incompleteMessageCache;
 
     public ChatServer(String host, int port) {
         this.host = host;
@@ -41,6 +42,7 @@ public class ChatServer {
         this.idClientBySocket = new ConcurrentHashMap<>();
         this.activeClients = new CopyOnWriteArrayList<>();
         this.queuedClientAnswer = new ConcurrentHashMap<>();
+        this.incompleteMessageCache = new ConcurrentHashMap<>();
     }
 
     public void startServer(){
@@ -123,40 +125,42 @@ public class ChatServer {
             communicationBuffer.flip();
             byte[] bytes = new byte[communicationBuffer.limit()];
             communicationBuffer.get(bytes);
-            String requests = new String(bytes);
-            if (!requests.isEmpty()) {
-                for (String request : requests.split(delimiter)) {
-                    if (  !queuedClientAnswer.containsKey(client) || queuedClientAnswer.get(client).equals("null")){
-                        processRequest(request, client);
-                    }else {
-                        finishHandshake(request, client);
-                    }
-                }
+            String newMessage = new String(bytes);
+            String existingData = incompleteMessageCache.getOrDefault(client, "");
+            String combined = newMessage + (!existingData.equals("null")? existingData:"");
+            if (combined.endsWith(delimiter)){
+                processRequests(combined, client);
+                incompleteMessageCache.put(client, "null");
+            }else {
+                incompleteMessageCache.put(client, combined);
+                System.out.println(incompleteMessageCache.get(client));
             }
             communicationBuffer.clear();
         }
     }
 
     private void finishHandshake(String request, SocketChannel client){
-        System.out.println(request + " Handshake");
-        if (request.equals(queuedClientAnswer.get(client))){
-            String[] reqParts = request.split(" ");
-            if (reqParts[0].equals("ACK") && reqParts[1].equals("RST") && reqParts.length == 3) {
-                queuedClientAnswer.put(client, "null");
-                activeClients.remove(client);
-            } else if (reqParts[0].equals("ACK") && reqParts.length == 2) {
-                globalLogInOutNotify("in", getName(client));
-                activeClients.add(client);
-                queuedClientAnswer.put(client, "null");
+        String[] reqParts = request.split(" ");
+        if (reqParts[0].equals("ACK") && reqParts.length == 2) {
+            loginHandler(request, client);
+            queuedClientAnswer.put(client, "null");
+        }
+    }
+    private void processRequests(String requests, SocketChannel client){
+        for (String request : requests.split(delimiter)) {
+            if (queuedClientAnswer.getOrDefault(client, "").equals(request)){
+                finishHandshake(request, client);
+            }else {
+                serviceRequest(request, client);
             }
         }
     }
-    private void processRequest(String request, SocketChannel client){
-        System.out.println(request);
+    private void serviceRequest(String request, SocketChannel client){
         String[] reqParts = request.split(" ");
         if (reqParts.length > 0){
             if (reqParts[0].equals("SYN")&& reqParts.length == 2) {
-                loginHandler(request, client);
+                respond("SYN " + reqParts[1] + " ACK", client);
+                queuedClientAnswer.put(client, "ACK " + reqParts[1]);
             } else if (reqParts[0].equals("SYN") && reqParts[1].equals("RST") && reqParts.length == 3) {
                 logoutHandler(client);
             } else {
@@ -174,13 +178,12 @@ public class ChatServer {
     private void loginHandler(String request, SocketChannel client){
         try {
             activeClients.add(client);
-            String name = request.replace("SYN ", "");
+            String name = request.replace("ACK ", "");
             String login_ = name + "\t" + client.getLocalAddress().toString();
             if (!idClientBySocket.containsKey(client)){
                 idClientBySocket.put(client, login_);
             }
-            respond("SYN " + name + " ACK", client);
-            queuedClientAnswer.put(client, "ACK " + getName(client));
+            globalLogInOutNotify("in", getName(client));
         } catch (IOException e) {
             exceptionHandler(client, "Could not retrieve client address. Exiting");
         }
@@ -188,11 +191,9 @@ public class ChatServer {
 
     private void logoutHandler(SocketChannel client){
         String name = getName(client);
-        respond("SYN RST " + name + " ACK", client);
         globalLogInOutNotify("out", name);
-        queuedClientAnswer.put(client, "ACK RST " + name);
-        System.out.println(queuedClientAnswer.get(client) + "<<<<<");
-
+        activeClients.remove(client);
+        respond("SYN RST " + name + " ACK", client);
     }
 
     private void globalRespond(String message, String name){
@@ -236,7 +237,6 @@ public class ChatServer {
             }
         }
     }
-
 
     private String getName(SocketChannel client) {
         return idClientBySocket.get(client).split("\t")[0];

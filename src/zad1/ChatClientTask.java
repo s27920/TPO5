@@ -49,7 +49,7 @@ public class ChatClientTask implements Runnable {
     }
 
     public String get() throws InterruptedException, ExecutionException {
-        return futureTask.get();
+            return futureTask.get();
     }
 
     public ChatClient getClient() {

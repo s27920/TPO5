@@ -63,7 +63,7 @@ public class ChatClient {
         int attempts = 0;
         while(attempts < MAX_ATTEMPTS){
             if (sendCommand("SYN RST " + id) == 1){
-                sendMessage("ACK RST " + id);
+//                sendMessage("ACK RST " + id);
                 close();
                 return;
             }
