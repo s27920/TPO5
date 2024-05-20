@@ -50,6 +50,5 @@ public class Main {
     System.out.println(s.getServerLog());
 
     ctasks.forEach(t -> System.out.println(t.getClient().getChatView()));
-    main(new String[]{});
   }
 }
