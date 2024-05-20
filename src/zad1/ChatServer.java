@@ -192,8 +192,10 @@ public class ChatServer {
     private void logoutHandler(SocketChannel client){
         String name = getName(client);
         globalLogInOutNotify("out", name);
-        activeClients.remove(client);
-        respond("SYN RST " + name + " ACK", client);
+        if (activeClients.contains(client)) {
+            activeClients.remove(client);
+            respond("SYN RST " + name + " ACK", client);
+        }
     }
 
     private void globalRespond(String message, String name){
