@@ -75,9 +75,11 @@ public class ChatClient {
         send(req);
         return processResponse(handleAwaitResponse());
     }
+
     public void sendMessage(String message){
         send(message);
     }
+
     private void send(String text){
         try {
             communicationBuffer.clear();
@@ -177,4 +179,5 @@ public class ChatClient {
     public String getChatView(){
         return chatView.toString();
     }
+
 }

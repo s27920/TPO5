@@ -55,4 +55,5 @@ public class ChatClientTask implements Runnable {
     public ChatClient getClient() {
         return client;
     }
+
 }

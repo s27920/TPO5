@@ -70,7 +70,7 @@ public class ChatServer {
 		}
 		executorService.shutdown();
 		try {
-			if (!executorService.awaitTermination(1, TimeUnit.MILLISECONDS)) {
+			if (!executorService.awaitTermination(1000, TimeUnit.MILLISECONDS)) {
 				executorService.shutdownNow();
 			}
 		} catch (InterruptedException e) {
@@ -145,6 +145,7 @@ public class ChatServer {
 			queuedClientAnswer.put(client, "null");
 		}
 	}
+
 	private void processRequests(String requests, SocketChannel client){
 		for (String request : requests.split(delimiter)) {
 			if (queuedClientAnswer.getOrDefault(client, "").equals(request)){
@@ -154,6 +155,7 @@ public class ChatServer {
 			}
 		}
 	}
+
 	private void serviceRequest(String request, SocketChannel client){
 		String[] reqParts = request.split(" ");
 		if (reqParts.length > 0){
@@ -250,4 +252,5 @@ public class ChatServer {
 	public StringBuilder getServerLog() {
 		return serverLog;
 	}
+
 }
